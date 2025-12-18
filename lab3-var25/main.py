@@ -1,112 +1,143 @@
-"""Увеличение скорости аудиофайлов."""
+"""Точка входа в приложение для увеличения скорости аудио."""
 import sys
 import os
 import argparse
-import numpy as np
-import soundfile as sf
-import matplotlib.pyplot as plt
+from audio_processor import (
+    load_audio,
+    save_audio,
+    increase_audio_speed,
+    get_audio_info
+)
+from visualizer import create_comparison_plot
 
 
-def speed_up_audio(audio, speed_factor):
-    """Увеличивает скорость аудио."""
-    if speed_factor <= 0:
-        raise ValueError("Коэффициент скорости должен быть > 0")
+def parse_arguments():
+    """Парсит аргументы командной строки."""
+    parser = argparse.ArgumentParser(
+        description='Увеличение скорости аудиофайла'
+    )
     
-    if len(audio.shape) == 1:
-        old_len = len(audio)
-        new_len = int(old_len / speed_factor)
-        return np.interp(np.linspace(0, old_len-1, new_len), 
-                        np.arange(old_len), audio)
-    else:
-        old_len = audio.shape[0]
-        new_len = int(old_len / speed_factor)
-        result = np.zeros((new_len, audio.shape[1]))
-        for i in range(audio.shape[1]):
-            result[:, i] = np.interp(np.linspace(0, old_len-1, new_len),
-                                   np.arange(old_len), audio[:, i])
-        return result
+    parser.add_argument(
+        'input_file',
+        help='Имя аудиофайла из папки piano_music'
+    )
+    parser.add_argument(
+        'output_file',
+        help='Имя выходного файла'
+    )
+    parser.add_argument(
+        'speed_factor',
+        type=float,
+        help='Коэффициент увеличения скорости (например: 2.0)'
+    )
+    
+    return parser.parse_args()
 
 
-def show_plot(orig, new, sr_orig, sr_new, factor):
-    """Показывает график сравнения."""
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
+def find_audio_file(filename: str) -> str:
+    """
+    Ищет аудиофайл по указанному пути.
     
-    samples_orig = min(len(orig), int(sr_orig * 2))
-    samples_new = min(len(new), int(sr_new * 2))
+    Args:
+        filename: Имя файла или путь
+        
+    Returns:
+        Полный путь к файлу
+        
+    Raises:
+        FileNotFoundError: Если файл не найден
+    """
+    if os.path.exists(filename):
+        return filename
     
-    time_orig = np.arange(samples_orig) / sr_orig
-    time_new = np.arange(samples_new) / sr_new
+    sounds_path = "../lab2-var25/piano_music/"
+    alt_path = os.path.join(sounds_path, filename)
     
-    if len(orig.shape) == 1:
-        ax1.plot(time_orig, orig[:samples_orig], 'b-', alpha=0.7, linewidth=0.8)
-        ax2.plot(time_new, new[:samples_new], 'r-', alpha=0.7, linewidth=0.8)
-    else:
-        ax1.plot(time_orig, orig[:samples_orig, 0], 'b-', alpha=0.7, linewidth=0.8)
-        ax2.plot(time_new, new[:samples_new, 0], 'r-', alpha=0.7, linewidth=0.8)
+    if os.path.exists(alt_path):
+        return alt_path
     
-    ax1.set_title(f'Оригинал ({len(orig)} сэмплов, {len(orig)/sr_orig:.1f}с)')
-    ax2.set_title(f'Ускоренное x{factor} ({len(new)} сэмплов, {len(new)/sr_new:.1f}с)')
+    raise FileNotFoundError(
+        f"Файл '{filename}' не найден!\n"
+        f"Проверенные пути:\n"
+        f"1. {filename}\n"
+        f"2. {alt_path}"
+    )
+
+
+def print_audio_statistics(info: dict, title: str):
+    """
+    Выводит статистику аудиофайла.
     
-    for ax in [ax1, ax2]:
-        ax.set_xlabel('Время (с)')
-        ax.set_ylabel('Амплитуда')
-        ax.grid(True, alpha=0.3)
-        ax.set_ylim(-1.1, 1.1)
-    
-    plt.tight_layout()
-    plt.show()
+    Args:
+        info: Словарь с информацией об аудио
+        title: Заголовок для вывода
+    """
+    print(f"\n{'='*50}")
+    print(title)
+    print('='*50)
+    print(f"Каналы: {info['channels']} ({'моно' if info['channels'] == 1 else 'стерео'})")
+    print(f"Сэмплов: {info['samples']:,}")
+    print(f"Частота дискретизации: {info['samplerate']} Hz")
+    print(f"Длительность: {info['duration']:.2f} секунд")
+    print(f"Размер массива: {info['shape']}")
+    print(f"Тип данных: {info['dtype']}")
+    print(f"Диапазон амплитуд: [{info['min_amplitude']:.4f}, {info['max_amplitude']:.4f}]")
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Увеличение скорости аудио')
-    parser.add_argument('input', help='Имя аудиофайла из папки piano_music')
-    parser.add_argument('output', help='Выходной файл')
-    parser.add_argument('factor', type=float, help='Коэффициент скорости')
+    """Основная функция приложения."""
+    args = parse_arguments()
     
-    args = parser.parse_args()
-    
-    SOUNDS_PATH = "../lab2-var25/piano_music/"
-    
-    if not os.path.exists(args.input):
-        alt_path = os.path.join(SOUNDS_PATH, args.input)
-        if os.path.exists(alt_path):
-            args.input = alt_path
-        else:
-            print(f"Файл '{args.input}' не найден!")
-            print(f"Искал в: {alt_path}")
-            print(f"Папка существует: {os.path.exists(SOUNDS_PATH)}")
-            sys.exit(1)
-    
-    if args.factor <= 0:
-        print("Ошибка: коэффициент скорости должен быть > 0")
+    if args.speed_factor <= 0:
+        print("Ошибка: Коэффициент скорости должен быть положительным числом.")
         sys.exit(1)
     
     try:
-        print(f"Загрузка: {args.input}")
-        audio, sr = sf.read(args.input)
+        input_path = find_audio_file(args.input_file)
+        print(f"Загрузка аудиофайла: {input_path}")
         
-        print(f"Размер: {audio.shape}")
-        print(f"Тип: {'моно' if len(audio.shape)==1 else 'стерео'}")
-        print(f"Сэмплов: {len(audio):,}")
-        print(f"Частота: {sr} Hz")
-        print(f"Длительность: {len(audio)/sr:.2f} сек")
+        audio_data, samplerate = load_audio(input_path)
         
-        print(f"\nУскоряем в {args.factor} раз...")
-        new_audio = speed_up_audio(audio, args.factor)
-        new_sr = int(sr * args.factor)
+        original_info = get_audio_info(audio_data, samplerate)
+        print_audio_statistics(original_info, "ИНФОРМАЦИЯ О ЗАГРУЖЕННОМ АУДИО")
         
-        print(f"Сохранение: {args.output}")
-        sf.write(args.output, new_audio, new_sr)
+        print(f"\nУвеличение скорости в {args.speed_factor} раз...")
+        sped_up_audio = increase_audio_speed(audio_data, args.speed_factor)
+        new_samplerate = int(samplerate * args.speed_factor)
         
-        print("\nГрафик...")
-        show_plot(audio, new_audio, sr, new_sr, args.factor)
+        result_info = get_audio_info(sped_up_audio, new_samplerate)
+        print_audio_statistics(result_info, "ИНФОРМАЦИЯ О РЕЗУЛЬТАТЕ")
         
-        print("\nГотово!")
-        print(f"Исходно: {len(audio)/sr:.2f} сек")
-        print(f"Результат: {len(new_audio)/new_sr:.2f} сек")
+        print(f"\nСохранение результата в файл: {args.output_file}")
+        save_audio(args.output_file, sped_up_audio, new_samplerate)
         
+        print("\nСоздание визуализации...")
+        create_comparison_plot(
+            audio_data,
+            sped_up_audio,
+            samplerate,
+            new_samplerate,
+            args.speed_factor
+        )
+        
+        print(f"\n{'='*50}")
+        print("ОБРАБОТКА ЗАВЕРШЕНА УСПЕШНО!")
+        print('='*50)
+        print(f"Исходный файл: {input_path}")
+        print(f"Результат: {args.output_file}")
+        print(f"Коэффициент скорости: {args.speed_factor}")
+        print(f"Исходная длительность: {original_info['duration']:.2f} с")
+        print(f"Новая длительность: {result_info['duration']:.2f} с")
+        print(f"Сокращение: {original_info['duration'] - result_info['duration']:.2f} с")
+        
+    except FileNotFoundError as e:
+        print(f"\nОШИБКА: {e}")
+        sys.exit(1)
+    except ValueError as e:
+        print(f"\nОШИБКА: {e}")
+        sys.exit(1)
     except Exception as e:
-        print(f"Ошибка: {e}")
+        print(f"\nНЕОЖИДАННАЯ ОШИБКА: {e}")
         sys.exit(1)
 
 
